@@ -1,0 +1,3 @@
+username,password,full_name,role,department,created_at,created_by
+admin,b31f05504b16500698bb8829013dafd3b8667974c90f5fdf47bd82cbd80ecb87,System Administrator,admin,General Stores,2025-12-23 14:02:33,system
+Fedelis,a4a3f4c0380934064350b45d03146516e36781012232bb96d4069bb031d9971d,Fedelis Amenga-etego,manager,General Stores,2026-01-13 11:17:28,admin
