@@ -612,7 +612,7 @@ st.markdown(
 
 # ========== MAIN NAVIGATION TABS ==========
 # Define the tabs
-tabs = ["🏠 Dashboard", "📦 Inventory", "📥 Stock In", "📤 Stock Out", "⏰ Expiry", "📊 Reports", "⚙️ Settings"]
+tabs = ["🏠 Dashboard", "📦 Inventory", "📥 Stock In", "📤 Stock Out", "⏰ Expiry", "📝 Reports", "⚙️ Settings"]
 
 # Create tabs using radio buttons with custom styling
 selected_tab = st.radio(
@@ -624,7 +624,7 @@ selected_tab = st.radio(
 
 # DASHBOARD TAB
 if selected_tab == "🏠 Dashboard":
-    st.markdown('<div class="section-header"><h2>📊 Dashboard Overview</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><h2>Dashboard Overview</h2></div>', unsafe_allow_html=True)
     
     # Calculate expiry metrics
     if 'expiry_date' in inventory_df.columns:
@@ -2062,4 +2062,5 @@ st.markdown(
     "© 2024 Navrongo Health Research Centre – Store Management System v1.1<br>"
     "Built for efficient inventory tracking and management</p>",
     unsafe_allow_html=True
+
 )
