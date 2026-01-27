@@ -687,7 +687,7 @@ if selected_tab == "🏠 Dashboard":
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 📊 Units by Category")
+            st.markdown("#### 📈 Units by Category")
             if 'category' in inventory_df.columns and 'quantity' in inventory_df.columns:
                 category_units = inventory_df.groupby('category')['quantity'].sum().reset_index()
                 if not category_units.empty:
@@ -1328,7 +1328,7 @@ elif selected_tab == "⏰ Expiry":
 
 # REPORTS TAB (Simplified)
 elif selected_tab == "📝 Reports":
-    st.markdown('<div class="section-header"><h2>📊 Reports & Analytics</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><h2>📈 Reports & Analytics</h2></div>', unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["Summary Report", "Export Data"])
     
@@ -1470,7 +1470,7 @@ elif selected_tab == "⚙️ Settings":
                         st.error(f"❌ {message}")
     
     with tab2:
-        st.markdown("#### 📊 System Information")
+        st.markdown("#### ℹ️ System Information")
         
         st.info(f"""
         **System Details:**
@@ -1486,7 +1486,7 @@ elif selected_tab == "⚙️ Settings":
         - Total Issues: {len(issues_df)}
         
         **Support Contact:**
-        - Email: it.support@nhrc.gov.gh
+        - Email: f.amengaetego@gmail.com
         - Phone: +233 54 754 8200
         """)
 
@@ -1494,7 +1494,8 @@ elif selected_tab == "⚙️ Settings":
 st.markdown("---")
 st.markdown(
     "<p style='text-align:center;font-size:13px;color:gray;margin-top:25px;'>"
-    "© 2024 Navrongo Health Research Centre – Store Management System v1.1<br>"
-    "Built for efficient inventory tracking and management</p>",
+    "© 2026 Navrongo Health Research Centre – Stores Management System<br>"
+    "Built by Amenga-etego Fedelis</p>",
     unsafe_allow_html=True
 )
+
