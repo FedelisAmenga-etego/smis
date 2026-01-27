@@ -665,7 +665,7 @@ if selected_tab == "🏠 Dashboard":
     
     metrics_data = [
         ("Total Items", len(inventory_df) if not inventory_df.empty else 0, "📦", "Total number of unique items"),
-        ("Total Units", f"{inventory_df['quantity'].sum():,}" if not inventory_df.empty and 'quantity' in inventory_df.columns else "0", "📊", "Total units across all items"),
+        ("Total Units", f"{inventory_df['quantity'].sum():,}" if not inventory_df.empty and 'quantity' in inventory_df.columns else "0", "📈", "Total units across all items"),
         ("Low Stock", len(inventory_df[(inventory_df['quantity'] <= inventory_df['reorder_level']) & (inventory_df['quantity'] > 0)]) if not inventory_df.empty and 'quantity' in inventory_df.columns and 'reorder_level' in inventory_df.columns else 0, "⚠️", "Items at or below reorder level"),
         ("Expiring Soon", expiring_30_count, "⏰", "Items expiring within 30 days")
     ]
@@ -1498,4 +1498,5 @@ st.markdown(
     "Built by Amenga-etego Fedelis</p>",
     unsafe_allow_html=True
 )
+
 
