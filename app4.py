@@ -83,7 +83,7 @@ class SimpleAuth:
     def show_login_interface(self):
         """Display login interface"""
         # Header
-        logo_html = "<div style='font-size: 3rem; margin-bottom: 0.5rem;'>🏪</div>"
+        logo_html = "<div style='font-size: 3rem; margin-bottom: 0.5rem;'></div>"
         
         st.markdown(
             f"""
@@ -623,9 +623,9 @@ issues_df = load_issues_data()
 st.markdown(
     f"""
     <div style='text-align:center;padding:6px 0 12px 0;background:transparent;'>
-        <div style='font-size: 3rem; margin-bottom: 0.5rem;'>🏪</div>
+        <div style='font-size: 3rem; margin-bottom: 0.5rem;'></div>
         <h3 style='margin:0;color:#2E7D32;'>Navrongo Health Research Centre</h3>
-        <h4 style='margin:0;color:#2E7D32;'>General Stores Department</h4>
+        <h4 style='margin:0;color:#2E7D32;'>General Stores</h4>
     </div>
     <hr style='border:1px solid rgba(0,0,0,0.08);margin-bottom:18px;'>
     """,
@@ -1498,5 +1498,6 @@ st.markdown(
     "Built by Amenga-etego Fedelis</p>",
     unsafe_allow_html=True
 )
+
 
 
