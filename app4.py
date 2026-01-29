@@ -1,259 +1,186 @@
 # stores_dashboard.py
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import os
 
-# --------------------------------------------------
-# PAGE CONFIG (MUST BE FIRST)
-# --------------------------------------------------
 st.set_page_config(
     page_title="NHRC Stores Management System",
     page_icon="🏪",
     layout="wide"
 )
 
-# --------------------------------------------------
-# FILE PATHS
-# --------------------------------------------------
-USERS_FILE = "users.csv"
-INVENTORY_FILE = "inventory.csv"
-RECEIPTS_FILE = "receipts.csv"
-ISSUES_FILE = "issues.csv"
+# ================== SESSION SAFETY ==================
+def init_session():
+    defaults = {
+        "logged_in": False,
+        "user": None,
+        "active_tab": "🏠 Dashboard"
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-# --------------------------------------------------
-# HELPERS
-# --------------------------------------------------
-def hash_password(pw):
+init_session()
+
+# ================== AUTH ==================
+USERS_FILE = "store_users.csv"
+
+def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-def load_csv(path, columns):
-    if path not in st.session_state:
-        if os.path.exists(path):
-            st.session_state[path] = pd.read_csv(path)
-        else:
-            st.session_state[path] = pd.DataFrame(columns=columns)
-    return st.session_state[path]
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        df = pd.DataFrame([{
+            "username": "admin",
+            "password": hash_pw("NHRC@26"),
+            "full_name": "System Administrator",
+            "role": "admin",
+            "department": "General Stores"
+        }])
+        df.to_csv(USERS_FILE, index=False)
+    return pd.read_csv(USERS_FILE)
 
-def save_csv(path):
-    st.session_state[path].to_csv(path, index=False)
-
-# --------------------------------------------------
-# AUTH SETUP
-# --------------------------------------------------
-if not os.path.exists(USERS_FILE):
-    pd.DataFrame([{
-        "username": "admin",
-        "password": hash_password("NHRC@26"),
-        "full_name": "System Administrator",
-        "role": "admin"
-    }]).to_csv(USERS_FILE, index=False)
-
-def authenticate(username, password):
-    users = pd.read_csv(USERS_FILE)
-    u = users[users.username == username]
-    if not u.empty and u.iloc[0].password == hash_password(password):
-        return u.iloc[0].to_dict()
+def authenticate(u, p):
+    df = load_users()
+    user = df[df.username == u]
+    if not user.empty and user.iloc[0].password == hash_pw(p):
+        return user.iloc[0].to_dict()
     return None
 
-# --------------------------------------------------
-# SESSION INIT
-# --------------------------------------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.user = None
-
-# --------------------------------------------------
-# LOGIN
-# --------------------------------------------------
-if not st.session_state.logged_in:
-    st.title("🔐 NHRC Stores Login")
-
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        login = st.form_submit_button("Login")
-
-        if login:
-            user = authenticate(username, password)
+def login_ui():
+    st.markdown("### 🔐 Login")
+    with st.form("login"):
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        if st.form_submit_button("Login"):
+            user = authenticate(u, p)
             if user:
                 st.session_state.logged_in = True
                 st.session_state.user = user
                 st.rerun()
             else:
-                st.error("Invalid username or password")
+                st.error("Invalid credentials")
 
+if not st.session_state.logged_in:
+    login_ui()
     st.stop()
 
-user = st.session_state.user
+# ================== DATA ==================
+INV_FILE = "inventory.csv"
+REC_FILE = "receipts.csv"
+ISS_FILE = "issues.csv"
 
-# --------------------------------------------------
-# LOAD DATA (ONCE)
-# --------------------------------------------------
-inventory = load_csv(
-    INVENTORY_FILE,
-    ["item_id", "item_name", "category", "quantity", "unit", "reorder_level"]
-)
+def load_df(path, cols):
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=cols)
+    return pd.read_csv(path)
 
-receipts = load_csv(
-    RECEIPTS_FILE,
-    ["date", "item_id", "item_name", "quantity", "unit_cost", "total_value", "received_by"]
-)
+def save_df(df, path):
+    df.to_csv(path, index=False)
 
-issues = load_csv(
-    ISSUES_FILE,
-    ["date", "item_id", "item_name", "quantity", "department", "issued_by"]
-)
+def inventory():
+    return load_df(INV_FILE, [
+        "item_id","item_name","category","quantity","unit",
+        "reorder_level","supplier","expiry_date"
+    ])
 
-# --------------------------------------------------
-# SIDEBAR
-# --------------------------------------------------
-with st.sidebar:
-    st.markdown(f"### 👤 {user['full_name']}")
-    if st.button("🚪 Logout"):
-        st.session_state.clear()
-        st.rerun()
+def receipts():
+    return load_df(REC_FILE, [
+        "date","item_id","item_name","quantity","unit_cost","total"
+    ])
 
-# --------------------------------------------------
-# NAVIGATION
-# --------------------------------------------------
-tab = st.radio(
-    "Navigation",
-    ["Dashboard", "Inventory", "Stock In", "Stock Out", "Reports"],
+def issues():
+    return load_df(ISS_FILE, [
+        "date","item_id","item_name","quantity","department"
+    ])
+
+# ================== NAV ==================
+tabs = ["🏠 Dashboard","📦 Inventory","📥 Stock In","📤 Stock Out","⚙️ Settings"]
+st.session_state.active_tab = st.radio(
+    "Navigation", tabs,
+    index=tabs.index(st.session_state.active_tab),
     horizontal=True
 )
 
-# --------------------------------------------------
-# DASHBOARD
-# --------------------------------------------------
-if tab == "Dashboard":
-    st.header("📊 Dashboard")
+tab = st.session_state.active_tab
 
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("Total Items", len(inventory))
-    col2.metric(
-        "Total Units",
-        int(inventory.quantity.astype(int).sum()) if not inventory.empty else 0
-    )
-    col3.metric("Low Stock Items",
-        len(inventory[inventory.quantity.astype(int) <= inventory.reorder_level.astype(int)])
-        if not inventory.empty else 0
-    )
-
-# --------------------------------------------------
-# INVENTORY
-# --------------------------------------------------
-elif tab == "Inventory":
-    st.header("📦 Inventory Management")
+# ================== INVENTORY ==================
+if tab == "📦 Inventory":
+    df = inventory()
+    st.dataframe(df, use_container_width=True)
 
     with st.form("add_item"):
-        st.subheader("➕ Add Item")
         name = st.text_input("Item Name")
-        category = st.text_input("Category")
-        qty = st.number_input("Quantity", min_value=0, step=1)
-        unit = st.text_input("Unit")
-        reorder = st.number_input("Reorder Level", min_value=1, step=1)
+        qty = st.number_input("Quantity", 0)
+        if st.form_submit_button("Add"):
+            new = {
+                "item_id": f"STR-{int(datetime.now().timestamp())}",
+                "item_name": name,
+                "category": "General",
+                "quantity": int(qty),
+                "unit": "Units",
+                "reorder_level": 10,
+                "supplier": "",
+                "expiry_date": ""
+            }
+            df = pd.concat([df, pd.DataFrame([new])])
+            save_df(df, INV_FILE)
+            st.success("Item added")
+            st.rerun()
 
-        if st.form_submit_button("Add Item"):
-            inventory.loc[len(inventory)] = [
-                f"STR-{len(inventory)+1}",
-                name,
-                category,
-                int(qty),
-                unit,
-                int(reorder)
-            ]
-            save_csv(INVENTORY_FILE)
-            st.success("Item added successfully")
+# ================== STOCK IN ==================
+elif tab == "📥 Stock In":
+    inv = inventory()
+    rec = receipts()
 
-    st.subheader("📋 Current Inventory")
-    st.dataframe(inventory, use_container_width=True)
+    item = st.selectbox("Item", inv.item_name)
+    qty = st.number_input("Qty", 1)
+    cost = st.number_input("Unit Cost", 0.0)
 
-# --------------------------------------------------
-# STOCK IN
-# --------------------------------------------------
-elif tab == "Stock In":
-    st.header("📥 Stock In")
+    total = float(qty) * float(cost)
+    st.metric("Total", f"GHS {total:,.2f}")
 
-    if inventory.empty:
-        st.warning("No inventory items available")
-    else:
-        with st.form("stock_in"):
-            item = st.selectbox("Item", inventory.item_name)
-            qty = st.number_input("Quantity Received", min_value=1, step=1)
-            cost = st.number_input("Unit Cost (GHS)", min_value=0.01, step=0.01)
+    if st.button("Record Receipt"):
+        idx = inv[inv.item_name == item].index[0]
+        inv.loc[idx,"quantity"] += int(qty)
+        save_df(inv, INV_FILE)
 
-            if st.form_submit_button("Receive Stock"):
-                idx = inventory.index[inventory.item_name == item][0]
+        rec = pd.concat([rec, pd.DataFrame([{
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "item_id": inv.loc[idx,"item_id"],
+            "item_name": item,
+            "quantity": int(qty),
+            "unit_cost": float(cost),
+            "total": total
+        }])])
+        save_df(rec, REC_FILE)
+        st.success("Stock updated")
+        st.rerun()
 
-                qty = int(qty)
-                cost = float(cost)
-                total = qty * cost
+# ================== STOCK OUT ==================
+elif tab == "📤 Stock Out":
+    inv = inventory()
+    iss = issues()
 
-                inventory.at[idx, "quantity"] += qty
+    item = st.selectbox("Item", inv.item_name)
+    qty = st.number_input("Qty", 1)
 
-                receipts.loc[len(receipts)] = [
-                    datetime.now().strftime("%Y-%m-%d"),
-                    inventory.at[idx, "item_id"],
-                    item,
-                    qty,
-                    cost,
-                    total,
-                    user["full_name"]
-                ]
+    idx = inv[inv.item_name == item].index[0]
+    if qty > inv.loc[idx,"quantity"]:
+        st.error("Insufficient stock")
+    elif st.button("Issue"):
+        inv.loc[idx,"quantity"] -= int(qty)
+        save_df(inv, INV_FILE)
 
-                save_csv(INVENTORY_FILE)
-                save_csv(RECEIPTS_FILE)
-
-                st.success(f"Stock received. Total value: GHS {total:,.2f}")
-
-# --------------------------------------------------
-# STOCK OUT
-# --------------------------------------------------
-elif tab == "Stock Out":
-    st.header("📤 Stock Out")
-
-    if inventory.empty:
-        st.warning("No inventory items available")
-    else:
-        with st.form("stock_out"):
-            item = st.selectbox("Item", inventory.item_name)
-            dept = st.text_input("Receiving Department")
-            qty = st.number_input("Quantity Issued", min_value=1, step=1)
-
-            if st.form_submit_button("Issue Stock"):
-                idx = inventory.index[inventory.item_name == item][0]
-                available = int(inventory.at[idx, "quantity"])
-
-                if qty > available:
-                    st.error("Insufficient stock")
-                else:
-                    inventory.at[idx, "quantity"] -= int(qty)
-
-                    issues.loc[len(issues)] = [
-                        datetime.now().strftime("%Y-%m-%d"),
-                        inventory.at[idx, "item_id"],
-                        item,
-                        int(qty),
-                        dept,
-                        user["full_name"]
-                    ]
-
-                    save_csv(INVENTORY_FILE)
-                    save_csv(ISSUES_FILE)
-
-                    st.success("Stock issued successfully")
-
-# --------------------------------------------------
-# REPORTS
-# --------------------------------------------------
-elif tab == "Reports":
-    st.header("📝 Reports")
-
-    st.subheader("📥 Receipts Log")
-    st.dataframe(receipts, use_container_width=True)
-
-    st.subheader("📤 Issues Log")
-    st.dataframe(issues, use_container_width=True)
+        iss = pd.concat([iss, pd.DataFrame([{
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "item_id": inv.loc[idx,"item_id"],
+            "item_name": item,
+            "quantity": int(qty),
+            "department": "General"
+        }])])
+        save_df(iss, ISS_FILE)
+        st.success("Stock issued")
+        st.rerun()
