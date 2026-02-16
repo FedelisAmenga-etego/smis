@@ -840,6 +840,10 @@ elif selected_tab == "📥 Stock In":
     with tab1:
         st.markdown("#### 📝 Record New Stock Receipt")
         
+        # Initialize session state for selected item
+        if 'selected_receipt_item' not in st.session_state:
+            st.session_state.selected_receipt_item = None
+        
         with st.form("receipt_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             
@@ -852,17 +856,34 @@ elif selected_tab == "📥 Stock In":
             
             with col2:
                 if not inventory_df.empty:
-                    selected_item = st.selectbox("Select Item*", inventory_df['item_name'].unique())
+                    # Create a list of item names for selection
+                    item_names = inventory_df['item_name'].tolist()
+                    
+                    # Item selection with callback to update session state
+                    def on_item_change():
+                        st.session_state.selected_receipt_item = st.session_state.receipt_item_selector
+                    
+                    selected_item = st.selectbox(
+                        "Select Item*", 
+                        item_names,
+                        key="receipt_item_selector",
+                        on_change=on_item_change
+                    )
+                    
+                    # Get current stock for selected item
                     if selected_item:
                         item_data = inventory_df[inventory_df['item_name'] == selected_item].iloc[0]
-                        current_stock = item_data.get('quantity', 0)
-                        st.info(f"**Current Stock:** {current_stock} {item_data.get('unit', 'units')}")
+                        current_stock = int(item_data.get('quantity', 0))  # Convert to Python int
+                        unit = item_data.get('unit', 'units')
+                        st.info(f"**Current Stock:** {current_stock} {unit}")
                     else:
                         current_stock = 0
+                        unit = 'units'
                 else:
                     st.warning("No items in inventory. Please add items first.")
                     selected_item = None
                     current_stock = 0
+                    unit = 'units'
                 
                 quantity = st.number_input("Quantity Received*", min_value=1, value=1)
                 unit_cost = st.number_input("Unit Cost (GHS)*", min_value=0.0, value=0.0, step=0.01, format="%.2f")
@@ -882,35 +903,42 @@ elif selected_tab == "📥 Stock In":
                 elif selected_item is None:
                     st.error("No item selected!")
                 else:
-                    # Update inventory
+                    # Get fresh item data
+                    item_data = inventory_df[inventory_df['item_name'] == selected_item].iloc[0]
+                    
+                    # Update inventory - convert numpy types to Python native types
+                    new_quantity = int(current_stock) + int(quantity)
                     updates = {
-                        'quantity': current_stock + quantity,
+                        'quantity': new_quantity,  # Already converted to Python int
                         'updated_at': datetime.now().isoformat(),
-                        'updated_by': user['username']
+                        'updated_by': str(user['username'])  # Ensure string
                     }
-                    success, result = db.update_inventory_item(item_data['item_id'], updates)
+                    
+                    success, result = db.update_inventory_item(str(item_data['item_id']), updates)
                     
                     if success:
-                        # Add to receipts
+                        # Add to receipts - convert all numpy types to Python native types
                         receipt_data = {
                             'date': receipt_date.isoformat(),
-                            'item_id': item_data['item_id'],
-                            'item_name': selected_item,
-                            'supplier': supplier,
-                            'quantity': quantity,
-                            'unit_cost': unit_cost,
-                            'total_value': total_value,
-                            'project_code': project_code,
-                            'reference': reference,
-                            'received_by': received_by,
-                            'notes': notes,
+                            'item_id': str(item_data['item_id']),
+                            'item_name': str(selected_item),
+                            'supplier': str(supplier),
+                            'quantity': int(quantity),
+                            'unit_cost': float(unit_cost),  # Convert to Python float
+                            'total_value': float(total_value),  # Convert to Python float
+                            'project_code': str(project_code),
+                            'reference': str(reference) if reference else '',
+                            'received_by': str(received_by),
+                            'notes': str(notes) if notes else '',
                             'created_at': datetime.now().isoformat()
                         }
                         
                         success2, result2 = db.create_receipt(receipt_data)
                         
                         if success2:
-                            st.success(f"✅ Receipt recorded successfully! Stock updated.")
+                            st.success(f"✅ Receipt recorded successfully! Stock updated to {new_quantity} units.")
+                            # Clear selection from session state
+                            st.session_state.selected_receipt_item = None
                             st.cache_data.clear()
                             st.rerun()
                         else:
@@ -928,18 +956,17 @@ elif selected_tab == "📥 Stock In":
             with col2:
                 end_date = st.date_input("To Date", value=datetime.now())
             
-            # Filter receipts
+            # Convert dates for filtering
             filtered_receipts = receipts_df.copy()
             filtered_receipts['date'] = pd.to_datetime(filtered_receipts['date'], errors='coerce')
-            filtered_receipts = filtered_receipts[
-                (filtered_receipts['date'] >= pd.Timestamp(start_date)) &
-                (filtered_receipts['date'] <= pd.Timestamp(end_date))
-            ]
+            mask = (filtered_receipts['date'] >= pd.Timestamp(start_date)) & \
+                   (filtered_receipts['date'] <= pd.Timestamp(end_date))
+            filtered_receipts = filtered_receipts[mask]
             
             if not filtered_receipts.empty:
                 total_receipts = len(filtered_receipts)
-                total_quantity = filtered_receipts['quantity'].sum()
-                total_value = filtered_receipts['total_value'].sum()
+                total_quantity = int(filtered_receipts['quantity'].sum())  # Convert to Python int
+                total_value = float(filtered_receipts['total_value'].sum())  # Convert to Python float
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -975,6 +1002,10 @@ elif selected_tab == "📤 Stock Out":
     with tab1:
         st.markdown("#### 📝 Issue Stock to Department")
         
+        # Initialize session state for selected item
+        if 'selected_issue_item' not in st.session_state:
+            st.session_state.selected_issue_item = None
+        
         with st.form("issue_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             
@@ -987,22 +1018,46 @@ elif selected_tab == "📤 Stock Out":
             
             with col2:
                 if not inventory_df.empty:
-                    selected_item = st.selectbox("Select Item*", inventory_df['item_name'].unique())
+                    # Create a list of item names for selection
+                    item_names = inventory_df['item_name'].tolist()
+                    
+                    # Item selection with callback to update session state
+                    def on_item_change():
+                        st.session_state.selected_issue_item = st.session_state.issue_item_selector
+                    
+                    selected_item = st.selectbox(
+                        "Select Item*", 
+                        item_names,
+                        key="issue_item_selector",
+                        on_change=on_item_change
+                    )
+                    
+                    # Get current stock for selected item
                     if selected_item:
                         item_data = inventory_df[inventory_df['item_name'] == selected_item].iloc[0]
-                        current_stock = item_data.get('quantity', 0)
-                        st.info(f"**Current Stock:** {current_stock} {item_data.get('unit', 'units')}")
+                        current_stock = int(item_data.get('quantity', 0))  # Convert to Python int
+                        unit = item_data.get('unit', 'units')
+                        st.info(f"**Current Stock:** {current_stock} {unit}")
+                        
+                        # Set max value for quantity input
+                        max_quantity = current_stock
                     else:
                         current_stock = 0
+                        unit = 'units'
+                        max_quantity = 0
                 else:
                     st.warning("No items in inventory. Please add items first.")
                     selected_item = None
                     current_stock = 0
+                    unit = 'units'
+                    max_quantity = 0
                 
-                if selected_item:
-                    quantity = st.number_input("Quantity to Issue*", min_value=1, value=1, max_value=int(current_stock))
-                else:
-                    quantity = st.number_input("Quantity to Issue*", min_value=1, value=1)
+                quantity = st.number_input(
+                    "Quantity to Issue*", 
+                    min_value=1, 
+                    value=1, 
+                    max_value=max_quantity if max_quantity > 0 else 1
+                )
                 
                 issued_by = st.text_input("Issued By*", value=user['full_name'])
             
@@ -1018,32 +1073,39 @@ elif selected_tab == "📤 Stock Out":
                 elif quantity > current_stock:
                     st.error(f"Cannot issue {quantity} units. Only {current_stock} available!")
                 else:
-                    # Update inventory
+                    # Get fresh item data
+                    item_data = inventory_df[inventory_df['item_name'] == selected_item].iloc[0]
+                    
+                    # Update inventory - convert numpy types to Python native types
+                    new_quantity = int(current_stock) - int(quantity)
                     updates = {
-                        'quantity': current_stock - quantity,
+                        'quantity': new_quantity,  # Already converted to Python int
                         'updated_at': datetime.now().isoformat(),
-                        'updated_by': user['username']
+                        'updated_by': str(user['username'])  # Ensure string
                     }
-                    success, result = db.update_inventory_item(item_data['item_id'], updates)
+                    
+                    success, result = db.update_inventory_item(str(item_data['item_id']), updates)
                     
                     if success:
-                        # Add to issues
+                        # Add to issues - convert all numpy types to Python native types
                         issue_data = {
                             'date': issue_date.isoformat(),
-                            'item_id': item_data['item_id'],
-                            'item_name': selected_item,
-                            'department': department,
-                            'quantity': quantity,
-                            'purpose': purpose,
-                            'issued_by': issued_by,
-                            'notes': notes,
+                            'item_id': str(item_data['item_id']),
+                            'item_name': str(selected_item),
+                            'department': str(department),
+                            'quantity': int(quantity),
+                            'purpose': str(purpose) if purpose else '',
+                            'issued_by': str(issued_by),
+                            'notes': str(notes) if notes else '',
                             'created_at': datetime.now().isoformat()
                         }
                         
                         success2, result2 = db.create_issue(issue_data)
                         
                         if success2:
-                            st.success(f"✅ Stock issued successfully!")
+                            st.success(f"✅ Stock issued successfully! Remaining stock: {new_quantity} units.")
+                            # Clear selection from session state
+                            st.session_state.selected_issue_item = None
                             st.cache_data.clear()
                             st.rerun()
                         else:
@@ -1061,17 +1123,17 @@ elif selected_tab == "📤 Stock Out":
             with col2:
                 end_date = st.date_input("To Date", value=datetime.now())
             
+            # Convert dates for filtering
             filtered_issues = issues_df.copy()
             filtered_issues['date'] = pd.to_datetime(filtered_issues['date'], errors='coerce')
-            filtered_issues = filtered_issues[
-                (filtered_issues['date'] >= pd.Timestamp(start_date)) &
-                (filtered_issues['date'] <= pd.Timestamp(end_date))
-            ]
+            mask = (filtered_issues['date'] >= pd.Timestamp(start_date)) & \
+                   (filtered_issues['date'] <= pd.Timestamp(end_date))
+            filtered_issues = filtered_issues[mask]
             
             if not filtered_issues.empty:
                 total_issues = len(filtered_issues)
-                total_quantity = filtered_issues['quantity'].sum()
-                departments = filtered_issues['department'].nunique()
+                total_quantity = int(filtered_issues['quantity'].sum())  # Convert to Python int
+                departments = int(filtered_issues['department'].nunique())  # Convert to Python int
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -1304,3 +1366,4 @@ st.markdown(
     "Built by Amenga-etego Fedelis</p>",
     unsafe_allow_html=True
 )
+
