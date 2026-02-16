@@ -840,9 +840,9 @@ elif selected_tab == "📥 Stock In":
     with tab1:
         st.markdown("#### 📝 Record New Stock Receipt")
         
-        # Initialize session state for selected item
-        if 'selected_receipt_item' not in st.session_state:
-            st.session_state.selected_receipt_item = None
+        # Initialize session state for selected item if not exists
+        if 'receipt_item_idx' not in st.session_state:
+            st.session_state.receipt_item_idx = 0
         
         with st.form("receipt_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -859,16 +859,16 @@ elif selected_tab == "📥 Stock In":
                     # Create a list of item names for selection
                     item_names = inventory_df['item_name'].tolist()
                     
-                    # Item selection with callback to update session state
-                    def on_item_change():
-                        st.session_state.selected_receipt_item = st.session_state.receipt_item_selector
-                    
+                    # Item selection without callback
                     selected_item = st.selectbox(
                         "Select Item*", 
                         item_names,
-                        key="receipt_item_selector",
-                        on_change=on_item_change
+                        index=st.session_state.receipt_item_idx
                     )
+                    
+                    # Update session state with current selection
+                    if selected_item:
+                        st.session_state.receipt_item_idx = item_names.index(selected_item)
                     
                     # Get current stock for selected item
                     if selected_item:
@@ -937,8 +937,6 @@ elif selected_tab == "📥 Stock In":
                         
                         if success2:
                             st.success(f"✅ Receipt recorded successfully! Stock updated to {new_quantity} units.")
-                            # Clear selection from session state
-                            st.session_state.selected_receipt_item = None
                             st.cache_data.clear()
                             st.rerun()
                         else:
@@ -952,9 +950,9 @@ elif selected_tab == "📥 Stock In":
         if not receipts_df.empty:
             col1, col2 = st.columns(2)
             with col1:
-                start_date = st.date_input("From Date", value=datetime.now() - timedelta(days=30))
+                start_date = st.date_input("From Date", key="receipt_start", value=datetime.now() - timedelta(days=30))
             with col2:
-                end_date = st.date_input("To Date", value=datetime.now())
+                end_date = st.date_input("To Date", key="receipt_end", value=datetime.now())
             
             # Convert dates for filtering
             filtered_receipts = receipts_df.copy()
@@ -1002,9 +1000,9 @@ elif selected_tab == "📤 Stock Out":
     with tab1:
         st.markdown("#### 📝 Issue Stock to Department")
         
-        # Initialize session state for selected item
-        if 'selected_issue_item' not in st.session_state:
-            st.session_state.selected_issue_item = None
+        # Initialize session state for selected item if not exists
+        if 'issue_item_idx' not in st.session_state:
+            st.session_state.issue_item_idx = 0
         
         with st.form("issue_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -1021,16 +1019,16 @@ elif selected_tab == "📤 Stock Out":
                     # Create a list of item names for selection
                     item_names = inventory_df['item_name'].tolist()
                     
-                    # Item selection with callback to update session state
-                    def on_item_change():
-                        st.session_state.selected_issue_item = st.session_state.issue_item_selector
-                    
+                    # Item selection without callback
                     selected_item = st.selectbox(
                         "Select Item*", 
                         item_names,
-                        key="issue_item_selector",
-                        on_change=on_item_change
+                        index=st.session_state.issue_item_idx
                     )
+                    
+                    # Update session state with current selection
+                    if selected_item:
+                        st.session_state.issue_item_idx = item_names.index(selected_item)
                     
                     # Get current stock for selected item
                     if selected_item:
@@ -1104,8 +1102,6 @@ elif selected_tab == "📤 Stock Out":
                         
                         if success2:
                             st.success(f"✅ Stock issued successfully! Remaining stock: {new_quantity} units.")
-                            # Clear selection from session state
-                            st.session_state.selected_issue_item = None
                             st.cache_data.clear()
                             st.rerun()
                         else:
@@ -1119,9 +1115,9 @@ elif selected_tab == "📤 Stock Out":
         if not issues_df.empty:
             col1, col2 = st.columns(2)
             with col1:
-                start_date = st.date_input("From Date", value=datetime.now() - timedelta(days=30))
+                start_date = st.date_input("From Date", key="issue_start", value=datetime.now() - timedelta(days=30))
             with col2:
-                end_date = st.date_input("To Date", value=datetime.now())
+                end_date = st.date_input("To Date", key="issue_end", value=datetime.now())
             
             # Convert dates for filtering
             filtered_issues = issues_df.copy()
@@ -1366,4 +1362,5 @@ st.markdown(
     "Built by Amenga-etego Fedelis</p>",
     unsafe_allow_html=True
 )
+
 
