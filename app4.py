@@ -5,75 +5,206 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
-import io
-import base64
-import os
 import hashlib
-from PIL import Image
 import warnings
+from supabase import create_client, Client
+import os
+from dotenv import load_dotenv
+
 warnings.filterwarnings('ignore')
 
-# ========== FIXED AUTHENTICATION SYSTEM ==========
-class SimpleAuth:
-    def __init__(self):
+# Load environment variables
+load_dotenv()
+
+# ========== SUPABASE CONFIGURATION ==========
+@st.cache_resource
+def init_supabase():
+    """Initialize Supabase client"""
+    url = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
+    key = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
+    
+    if not url or not key:
+        st.error("Supabase credentials not found. Please set SUPABASE_URL and SUPABASE_KEY in secrets or environment variables.")
+        st.stop()
+    
+    return create_client(url, key)
+
+supabase = init_supabase()
+
+# ========== DATABASE OPERATIONS ==========
+class DatabaseManager:
+    def __init__(self, supabase_client):
+        self.supabase = supabase_client
+    
+    # User operations
+    def get_users(self):
+        """Get all users"""
+        try:
+            response = self.supabase.table('users').select('*').execute()
+            if response.data:
+                return pd.DataFrame(response.data)
+            return pd.DataFrame()
+        except Exception as e:
+            st.error(f"Error fetching users: {e}")
+            return pd.DataFrame()
+    
+    def get_user(self, username):
+        """Get user by username"""
+        try:
+            response = self.supabase.table('users').select('*').eq('username', username).execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            st.error(f"Error fetching user: {e}")
+            return None
+    
+    def create_user(self, user_data):
+        """Create new user"""
+        try:
+            response = self.supabase.table('users').insert(user_data).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+    
+    def update_user(self, username, updates):
+        """Update user"""
+        try:
+            response = self.supabase.table('users').update(updates).eq('username', username).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+    
+    def delete_user(self, username):
+        """Delete user"""
+        try:
+            response = self.supabase.table('users').delete().eq('username', username).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+    
+    # Inventory operations
+    def get_inventory(self):
+        """Get all inventory items"""
+        try:
+            response = self.supabase.table('inventory').select('*').execute()
+            if response.data:
+                return pd.DataFrame(response.data)
+            return pd.DataFrame()
+        except Exception as e:
+            st.error(f"Error fetching inventory: {e}")
+            return pd.DataFrame()
+    
+    def create_inventory_item(self, item_data):
+        """Create new inventory item"""
+        try:
+            response = self.supabase.table('inventory').insert(item_data).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+    
+    def update_inventory_item(self, item_id, updates):
+        """Update inventory item"""
+        try:
+            response = self.supabase.table('inventory').update(updates).eq('item_id', item_id).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+    
+    def delete_inventory_item(self, item_id):
+        """Delete inventory item"""
+        try:
+            response = self.supabase.table('inventory').delete().eq('item_id', item_id).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+    
+    # Receipts operations
+    def get_receipts(self):
+        """Get all receipts"""
+        try:
+            response = self.supabase.table('receipts').select('*').order('date', desc=True).execute()
+            if response.data:
+                return pd.DataFrame(response.data)
+            return pd.DataFrame()
+        except Exception as e:
+            st.error(f"Error fetching receipts: {e}")
+            return pd.DataFrame()
+    
+    def create_receipt(self, receipt_data):
+        """Create new receipt"""
+        try:
+            response = self.supabase.table('receipts').insert(receipt_data).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+    
+    # Issues operations
+    def get_issues(self):
+        """Get all issues"""
+        try:
+            response = self.supabase.table('issues').select('*').order('date', desc=True).execute()
+            if response.data:
+                return pd.DataFrame(response.data)
+            return pd.DataFrame()
+        except Exception as e:
+            st.error(f"Error fetching issues: {e}")
+            return pd.DataFrame()
+    
+    def create_issue(self, issue_data):
+        """Create new issue"""
+        try:
+            response = self.supabase.table('issues').insert(issue_data).execute()
+            return True, response.data
+        except Exception as e:
+            return False, str(e)
+
+# Initialize database manager
+db = DatabaseManager(supabase)
+
+# ========== AUTHENTICATION SYSTEM ==========
+class SupabaseAuth:
+    def __init__(self, db_manager):
+        self.db = db_manager
         self.session_key = 'logged_in'
         self.username_key = 'username'
-        self.users_file = 'store_users.csv'
         
-        # Initialize default admin user
-        self.init_default_users()
+        # Initialize default admin user if not exists
+        self.init_default_admin()
     
     def hash_password(self, password):
         """Hash password using SHA-256"""
         return hashlib.sha256(password.encode()).hexdigest()
     
-    def init_default_users(self):
-        """Initialize default users if file doesn't exist"""
-        if not os.path.exists(self.users_file):
-            default_users = pd.DataFrame([{
+    def init_default_admin(self):
+        """Initialize default admin user if no users exist"""
+        users_df = self.db.get_users()
+        if users_df.empty:
+            admin_data = {
                 'username': 'admin',
-                'password': self.hash_password('NHRC@26'),  # Hashed password
+                'password': self.hash_password('NHRC@26'),
                 'full_name': 'System Administrator',
                 'role': 'admin',
                 'department': 'General Stores',
-                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'created_at': datetime.now().isoformat(),
                 'created_by': 'system'
-            }])
-            default_users.to_csv(self.users_file, index=False)
-    
-    def get_users(self):
-        """Load users from CSV"""
-        try:
-            if os.path.exists(self.users_file):
-                return pd.read_csv(self.users_file)
-            return pd.DataFrame()
-        except:
-            return pd.DataFrame()
-    
-    def save_users(self, users_df):
-        """Save users to CSV"""
-        users_df.to_csv(self.users_file, index=False)
+            }
+            self.db.create_user(admin_data)
     
     def authenticate(self, username, password):
         """Authenticate user"""
-        users_df = self.get_users()
-        if not users_df.empty:
-            user = users_df[users_df['username'] == username]
-            if not user.empty:
-                hashed_input = self.hash_password(password)
-                if user.iloc[0]['password'] == hashed_input:
-                    return user.iloc[0].to_dict()
+        user = self.db.get_user(username)
+        if user and user['password'] == self.hash_password(password):
+            return user
         return None
     
     def check_auth(self):
         """Check if user is authenticated"""
-        # Initialize session state
         if self.session_key not in st.session_state:
             st.session_state[self.session_key] = False
             st.session_state[self.username_key] = ''
             st.session_state['user_data'] = {}
         
-        # If not logged in, show login interface
         if not st.session_state[self.session_key]:
             self.show_login_interface()
             st.stop()
@@ -82,13 +213,9 @@ class SimpleAuth:
     
     def show_login_interface(self):
         """Display login interface"""
-        # Header
-        logo_html = "<div style='font-size: 3rem; margin-bottom: 0.5rem;'></div>"
-        
         st.markdown(
             f"""
             <div style='text-align:center;padding:6px 0 12px 0;background:transparent;'>
-                {logo_html}
                 <h3 style='margin:0;color:#2E7D32;'>Navrongo Health Research Centre</h3>
                 <h4 style='margin:0;color:#2E7D32;'>General Stores Department</h4>
             </div>
@@ -97,7 +224,6 @@ class SimpleAuth:
             unsafe_allow_html=True
         )
         
-        # Login form in main area
         st.markdown("<h3 style='text-align:center;'>🔐 Login</h3>", unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -119,33 +245,15 @@ class SimpleAuth:
                                 st.session_state[self.username_key] = username
                                 st.session_state['user_data'] = user_info
                                 
-                                # Ensure user_info has all required fields
-                                if 'full_name' not in user_info:
-                                    user_info['full_name'] = user_info.get('username', 'User').title()
-                                if 'department' not in user_info:
-                                    user_info['department'] = 'General Stores'
-                                if 'role' not in user_info:
-                                    user_info['role'] = 'user'
-                                
                                 st.success(f"✅ Signed in as {user_info['full_name']}")
                                 st.rerun()
                             else:
                                 st.error("❌ Invalid username or password")
     
-    def login(self, username, password):
-        """Login user"""
-        user = self.authenticate(username, password)
-        if user:
-            st.session_state[self.session_key] = True
-            st.session_state[self.username_key] = username
-            st.session_state['user_data'] = user
-            return True
-        return False
-    
     def logout(self):
         """Logout user"""
         for key in list(st.session_state.keys()):
-            if key not in ['_theme', '_pages']:  # Preserve theme and pages
+            if key not in ['_theme', '_pages']:
                 del st.session_state[key]
         st.rerun()
     
@@ -155,201 +263,27 @@ class SimpleAuth:
     
     def add_user(self, user_data, created_by):
         """Add new user"""
-        users_df = self.get_users()
-        
         # Check if username exists
-        if user_data['username'] in users_df['username'].values:
+        existing = self.db.get_user(user_data['username'])
+        if existing:
             return False, "Username already exists"
         
         # Hash password
         user_data['password'] = self.hash_password(user_data['password'])
-        user_data['created_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        user_data['created_at'] = datetime.now().isoformat()
         user_data['created_by'] = created_by
         
-        # Add to users
-        new_user = pd.DataFrame([user_data])
-        users_df = pd.concat([users_df, new_user], ignore_index=True)
-        self.save_users(users_df)
-        
-        return True, "User added successfully"
-    
-    def update_user(self, username, updates, updated_by):
-        """Update user information"""
-        users_df = self.get_users()
-        
-        if username not in users_df['username'].values:
-            return False, "User not found"
-        
-        # Update user
-        idx = users_df.index[users_df['username'] == username][0]
-        
-        for key, value in updates.items():
-            if key == 'password' and value:  # Hash new password
-                users_df.at[idx, key] = self.hash_password(value)
-            elif key != 'password':  # Skip password if not provided
-                users_df.at[idx, key] = value
-        
-        users_df.at[idx, 'updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        users_df.at[idx, 'updated_by'] = updated_by
-        
-        self.save_users(users_df)
-        return True, "User updated successfully"
-    
-    def delete_user(self, username, deleted_by):
-        """Delete user (cannot delete admin)"""
-        if username == 'admin':
-            return False, "Cannot delete admin user"
-        
-        users_df = self.get_users()
-        
-        if username not in users_df['username'].values:
-            return False, "User not found"
-        
-        # Remove user
-        users_df = users_df[users_df['username'] != username]
-        self.save_users(users_df)
-        
-        return True, "User deleted successfully"
+        # Create user
+        success, result = self.db.create_user(user_data)
+        if success:
+            return True, "User added successfully"
+        else:
+            return False, f"Error creating user: {result}"
 
 # Initialize authentication
-auth = SimpleAuth()
+auth = SupabaseAuth(db)
 
-# ========== FIXED DATA MANAGEMENT ==========
-def load_inventory_data():
-    """Load inventory data from CSV"""
-    try:
-        # Try to load from session state first
-        if 'inventory_df' in st.session_state:
-            return st.session_state.inventory_df
-        
-        # Try to load from file
-        if os.path.exists("inventory_data.csv"):
-            df = pd.read_csv("inventory_data.csv")
-            # Ensure required columns exist
-            required_cols = ['item_id', 'item_name', 'category', 'quantity', 'unit', 
-                            'reorder_level', 'storage_location', 'supplier', 'notes']
-            for col in required_cols:
-                if col not in df.columns:
-                    if col == 'item_id':
-                        df['item_id'] = df.apply(lambda row: f"STR-{str(row['category'])[:3].upper() if pd.notna(row.get('category')) else 'GEN'}-{row.name+1:04d}", axis=1)
-                    elif col == 'reorder_level':
-                        df['reorder_level'] = 10
-                    else:
-                        df[col] = ''
-            
-            # Handle expiry dates
-            if 'expiry_date' in df.columns:
-                df['expiry_date'] = pd.to_datetime(df['expiry_date'], errors='coerce')
-            
-            # Convert quantity to numeric
-            if 'quantity' in df.columns:
-                df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
-            
-            st.session_state.inventory_df = df
-            return df
-        else:
-            # Create empty inventory
-            df = pd.DataFrame(columns=[
-                'item_id', 'item_name', 'category', 'quantity', 'unit',
-                'reorder_level', 'storage_location', 'supplier', 'notes', 'expiry_date'
-            ])
-            st.session_state.inventory_df = df
-            return df
-    except Exception as e:
-        st.error(f"Error loading inventory: {e}")
-        # Create empty inventory
-        df = pd.DataFrame(columns=[
-            'item_id', 'item_name', 'category', 'quantity', 'unit',
-            'reorder_level', 'storage_location', 'supplier', 'notes', 'expiry_date'
-        ])
-        st.session_state.inventory_df = df
-        return df
-
-def save_inventory_data(df):
-    """Save inventory data to CSV and session state"""
-    try:
-        df.to_csv("inventory_data.csv", index=False)
-        st.session_state.inventory_df = df
-        return True
-    except Exception as e:
-        st.error(f"Error saving inventory: {e}")
-        return False
-
-def load_receipts_data():
-    """Load receipts data"""
-    try:
-        if 'receipts_df' in st.session_state:
-            return st.session_state.receipts_df
-        
-        if os.path.exists("receipts_data.csv"):
-            df = pd.read_csv("receipts_data.csv")
-            st.session_state.receipts_df = df
-            return df
-        else:
-            df = pd.DataFrame(columns=[
-                'date', 'item_id', 'item_name', 'supplier', 'quantity', 
-                'unit_cost', 'total_value', 'project_code', 'reference', 
-                'received_by', 'notes'
-            ])
-            st.session_state.receipts_df = df
-            return df
-    except Exception as e:
-        st.error(f"Error loading receipts: {e}")
-        df = pd.DataFrame(columns=[
-            'date', 'item_id', 'item_name', 'supplier', 'quantity', 
-            'unit_cost', 'total_value', 'project_code', 'reference', 
-            'received_by', 'notes'
-        ])
-        st.session_state.receipts_df = df
-        return df
-
-def save_receipts_data(df):
-    """Save receipts data"""
-    try:
-        df.to_csv("receipts_data.csv", index=False)
-        st.session_state.receipts_df = df
-        return True
-    except Exception as e:
-        st.error(f"Error saving receipts: {e}")
-        return False
-
-def load_issues_data():
-    """Load issues data"""
-    try:
-        if 'issues_df' in st.session_state:
-            return st.session_state.issues_df
-        
-        if os.path.exists("issues_data.csv"):
-            df = pd.read_csv("issues_data.csv")
-            st.session_state.issues_df = df
-            return df
-        else:
-            df = pd.DataFrame(columns=[
-                'date', 'item_id', 'item_name', 'department', 'quantity', 
-                'purpose', 'issued_by', 'notes'
-            ])
-            st.session_state.issues_df = df
-            return df
-    except Exception as e:
-        st.error(f"Error loading issues: {e}")
-        df = pd.DataFrame(columns=[
-            'date', 'item_id', 'item_name', 'department', 'quantity', 
-            'purpose', 'issued_by', 'notes'
-        ])
-        st.session_state.issues_df = df
-        return df
-
-def save_issues_data(df):
-    """Save issues data"""
-    try:
-        df.to_csv("issues_data.csv", index=False)
-        st.session_state.issues_df = df
-        return True
-    except Exception as e:
-        st.error(f"Error saving issues: {e}")
-        return False
-
-# Page Configuration
+# ========== PAGE CONFIGURATION ==========
 st.set_page_config(
     page_title="NHRC Stores Management System",
     page_icon="🏪",
@@ -382,20 +316,6 @@ st.markdown("""
     
     [data-testid="stSidebar"] * {
         color: var(--sidebar-text) !important;
-    }
-    
-    [data-testid="stSidebar"] .stButton button {
-        background: rgba(0, 0, 0, 0.05) !important;
-        color: var(--sidebar-text) !important;
-        border: 1px solid rgba(0, 0, 0, 0.1) !important;
-        border-radius: 10px !important;
-    }
-    
-    [data-testid="stSidebar"] .stButton button:hover {
-        background: rgba(0, 0, 0, 0.1) !important;
-        border: 1px solid rgba(0, 0, 0, 0.2) !important;
-        transform: translateY(-1px);
-        transition: all 0.3s ease;
     }
     
     /* Main navigation tabs styling */
@@ -438,17 +358,6 @@ st.markdown("""
         border-color: var(--primary) !important;
     }
     
-    /* Header styling */
-    .main-header {
-        background: linear-gradient(135deg, var(--primary), var(--secondary));
-        padding: 1.5rem;
-        border-radius: 16px;
-        color: white;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 10px 30px rgba(46, 125, 50, 0.2);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    
     /* Metric cards */
     .metric-card {
         background: white;
@@ -463,16 +372,6 @@ st.markdown("""
         justify-content: center;
         position: relative;
         overflow: hidden;
-    }
-    
-    .metric-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(135deg, var(--primary), var(--secondary));
     }
     
     .metric-card:hover {
@@ -502,50 +401,6 @@ st.markdown("""
         font-weight: 600;
         letter-spacing: 0.5px;
     }
-    
-    /* Section headers */
-    .section-header {
-        background: white;
-        padding: 1.2rem 1.8rem;
-        border-radius: 14px;
-        margin: 1rem 0;
-        border-left: 6px solid var(--primary);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        border-bottom: 2px solid #f1f5f9;
-    }
-    
-    /* Buttons */
-    .stButton>button {
-        border-radius: 10px !important;
-        font-weight: 600 !important;
-        padding: 0.6rem 1.2rem !important;
-        transition: all 0.3s ease !important;
-        background: linear-gradient(135deg, var(--primary), var(--secondary)) !important;
-        color: white !important;
-        border: none !important;
-        letter-spacing: 0.5px !important;
-    }
-    
-    .stButton>button:hover {
-        transform: translateY(-3px) !important;
-        box-shadow: 0 10px 25px rgba(46, 125, 50, 0.25) !important;
-    }
-    
-    /* Status badges */
-    .status-badge {
-        padding: 0.4rem 1rem;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        display: inline-block;
-        letter-spacing: 0.3px;
-    }
-    
-    .status-adequate { background: #d1fae5; color: #059669; border: 1px solid #a7f3d0; }
-    .status-low { background: #fef3c7; color: #d97706; border: 1px solid #fde68a; }
-    .status-critical { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
-    .status-expired { background: #fee; color: #c00; border: 1px solid #fcc; }
-    .status-expiring { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
     
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
@@ -581,9 +436,29 @@ st.markdown("""
 # ========== CHECK AUTHENTICATION ==========
 user = auth.check_auth()
 
-# ========== SIDEBAR USER INFO (AFTER LOGIN) ==========
+# ========== LOAD DATA FROM SUPABASE ==========
+@st.cache_data(ttl=60)  # Cache for 60 seconds
+def load_inventory_data():
+    """Load inventory data from Supabase"""
+    return db.get_inventory()
+
+@st.cache_data(ttl=60)
+def load_receipts_data():
+    """Load receipts data from Supabase"""
+    return db.get_receipts()
+
+@st.cache_data(ttl=60)
+def load_issues_data():
+    """Load issues data from Supabase"""
+    return db.get_issues()
+
+# Load data
+inventory_df = load_inventory_data()
+receipts_df = load_receipts_data()
+issues_df = load_issues_data()
+
+# ========== SIDEBAR USER INFO ==========
 with st.sidebar:
-    # User Info Section
     st.markdown("### 👤 User Information")
     
     user_info_html = f"""
@@ -598,32 +473,19 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Quick Actions
     st.markdown("### ⚡ Quick Actions")
     
     if st.button("🔄 Refresh Data", use_container_width=True, type="secondary"):
-        # Clear cache and reload data
-        if 'inventory_df' in st.session_state:
-            del st.session_state.inventory_df
-        if 'receipts_df' in st.session_state:
-            del st.session_state.receipts_df
-        if 'issues_df' in st.session_state:
-            del st.session_state.issues_df
+        st.cache_data.clear()
         st.rerun()
     
     if st.button("🚪 Logout", use_container_width=True, type="secondary"):
         auth.logout()
 
-# Load data
-inventory_df = load_inventory_data()
-receipts_df = load_receipts_data()
-issues_df = load_issues_data()
-
-# ========== DISPLAY MAIN HEADER ==========
+# ========== MAIN HEADER ==========
 st.markdown(
     f"""
     <div style='text-align:center;padding:6px 0 12px 0;background:transparent;'>
-        <div style='font-size: 3rem; margin-bottom: 0.5rem;'></div>
         <h3 style='margin:0;color:#2E7D32;'>Navrongo Health Research Centre</h3>
         <h4 style='margin:0;color:#2E7D32;'>General Stores</h4>
     </div>
@@ -633,10 +495,8 @@ st.markdown(
 )
 
 # ========== MAIN NAVIGATION TABS ==========
-# Define the tabs
 tabs = ["🏠 Dashboard", "📦 Inventory", "📥 Stock In", "📤 Stock Out", "⏰ Expiry", "📝 Reports", "⚙️ Settings"]
 
-# Create tabs using radio buttons
 selected_tab = st.radio(
     "Navigation",
     tabs,
@@ -682,7 +542,7 @@ if selected_tab == "🏠 Dashboard":
     
     st.markdown("---")
     
-    # Charts Row 1
+    # Charts Row
     if not inventory_df.empty:
         col1, col2 = st.columns(2)
         
@@ -697,8 +557,7 @@ if selected_tab == "🏠 Dashboard":
                         y='quantity',
                         color='quantity',
                         color_continuous_scale='Viridis',
-                        text='quantity',
-                        title=""
+                        text='quantity'
                     )
                     fig.update_layout(height=400, plot_bgcolor='white', paper_bgcolor='white')
                     fig.update_traces(texttemplate='%{text:,}', textposition='outside')
@@ -711,8 +570,7 @@ if selected_tab == "🏠 Dashboard":
                     inventory_df,
                     values='quantity',
                     names='category',
-                    hole=0.4,
-                    title=""
+                    hole=0.4
                 )
                 fig.update_layout(height=400)
                 st.plotly_chart(fig, use_container_width=True)
@@ -728,14 +586,6 @@ if selected_tab == "🏠 Dashboard":
         if not low_stock_items.empty:
             display_cols = ['item_name', 'category', 'quantity', 'unit', 'reorder_level']
             display_df = low_stock_items[[col for col in display_cols if col in low_stock_items.columns]].copy()
-            
-            def get_stock_status(row):
-                if row['quantity'] == 0:
-                    return '<span class="status-badge status-critical">Critical</span>'
-                else:
-                    return '<span class="status-badge status-low">Low</span>'
-            
-            display_df['status'] = display_df.apply(get_stock_status, axis=1)
             
             st.dataframe(display_df, use_container_width=True)
         else:
@@ -768,14 +618,12 @@ elif selected_tab == "📦 Inventory":
         if search and not inventory_df.empty:
             if 'item_name' in inventory_df.columns:
                 filtered = filtered[filtered['item_name'].str.contains(search, case=False, na=False)]
-            if 'item_id' in inventory_df.columns:
-                filtered = filtered[filtered['item_id'].str.contains(search, case=False, na=False)]
         
         if category_filter != "All" and 'category' in filtered.columns:
             filtered = filtered[filtered['category'] == category_filter]
         
         # Calculate days to expiry for filtering
-        if not inventory_df.empty and 'expiry_date' in inventory_df.columns:
+        if not filtered.empty and 'expiry_date' in filtered.columns:
             filtered['expiry_date_dt'] = pd.to_datetime(filtered['expiry_date'], errors='coerce')
             current_date = pd.Timestamp.now()
             filtered['days_to_expiry'] = (filtered['expiry_date_dt'] - current_date).dt.days
@@ -804,7 +652,6 @@ elif selected_tab == "📦 Inventory":
         
         # Display with formatting
         if not filtered.empty:
-            # Prepare display dataframe
             display_cols = ['item_id', 'item_name', 'category', 'quantity', 'unit']
             if 'storage_location' in filtered.columns:
                 display_cols.append('storage_location')
@@ -850,11 +697,10 @@ elif selected_tab == "📦 Inventory":
                 storage_location = st.selectbox("Storage Location", 
                                               ["Main Store", "Lab A", "Lab B", "Cold Room", "Quarantine", "Archive", "Warehouse"])
                 
-                # Expiry date option
                 expiry_option = st.radio("Has expiry date?", ["No", "Yes"])
                 if expiry_option == "Yes":
                     expiry_date = st.date_input("Expiry Date", 
-                                              value=datetime.now() + timedelta(days=365))
+                                              value=datetime.now() + timedelta(days=365)).isoformat()
                 else:
                     expiry_date = None
                 
@@ -881,25 +727,26 @@ elif selected_tab == "📦 Inventory":
                         'reorder_level': reorder_level,
                         'supplier': supplier,
                         'notes': notes,
-                        'created_date': datetime.now().strftime('%Y-%m-%d')
+                        'created_date': datetime.now().isoformat(),
+                        'created_by': user['username']
                     }
                     
-                    # Add expiry date only if provided
-                    if expiry_option == "Yes" and expiry_date:
-                        item_data['expiry_date'] = expiry_date.strftime('%Y-%m-%d')
+                    if expiry_date:
+                        item_data['expiry_date'] = expiry_date
                     
-                    # Add to inventory
-                    new_item = pd.DataFrame([item_data])
-                    inventory_df = pd.concat([inventory_df, new_item], ignore_index=True)
-                    save_inventory_data(inventory_df)
-                    st.success(f"✅ Item '{item_name}' added successfully!")
-                    st.rerun()
+                    success, result = db.create_inventory_item(item_data)
+                    
+                    if success:
+                        st.success(f"✅ Item '{item_name}' added successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Error adding item: {result}")
     
     with tab3:
         st.markdown("#### ✏️ Edit/Delete Inventory Item")
         
         if not inventory_df.empty:
-            # Item selection
             item_to_edit = st.selectbox("Select item to edit/delete", 
                                        inventory_df['item_name'].unique())
             
@@ -909,7 +756,6 @@ elif selected_tab == "📦 Inventory":
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    # Edit form
                     with st.form("edit_item_form"):
                         st.markdown(f"**Editing: {item_to_edit}**")
                         
@@ -918,88 +764,57 @@ elif selected_tab == "📦 Inventory":
                                                      min_value=0, 
                                                      value=int(current_qty))
                         
-                        if 'storage_location' in item_data:
-                            locations = ["Main Store", "Lab A", "Lab B", "Cold Room", "Quarantine", "Archive", "Warehouse"]
-                            current_location = item_data.get('storage_location', 'Main Store')
-                            new_location = st.selectbox("Storage Location", 
-                                                      locations,
-                                                      index=locations.index(current_location) if current_location in locations else 0)
+                        locations = ["Main Store", "Lab A", "Lab B", "Cold Room", "Quarantine", "Archive", "Warehouse"]
+                        current_location = item_data.get('storage_location', 'Main Store')
+                        new_location = st.selectbox("Storage Location", 
+                                                  locations,
+                                                  index=locations.index(current_location) if current_location in locations else 0)
                         
-                        if 'category' in item_data:
-                            categories = ["Stationery", "Comp/Printer/Accessories", "Miscellaneous", 
-                                         "Electrical Items", "Motor Parts", "Vehicle Parts - Toyota Hilux",
-                                         "Fuel & Lubricants", "Laboratory Items", "Medical Supplies", "Office Equipment"]
-                            current_category = item_data.get('category', 'Miscellaneous')
-                            new_category = st.selectbox("Category", 
-                                                      categories,
-                                                      index=categories.index(current_category) if current_category in categories else 0)
-                        
-                        # Handle expiry date
-                        current_expiry = item_data.get('expiry_date')
-                        if pd.notna(current_expiry):
-                            expiry_option = st.radio("Expiry Date", ["Keep current", "Change", "Remove"])
-                            if expiry_option == "Change":
-                                new_expiry = st.date_input("New Expiry Date", 
-                                                          value=pd.to_datetime(current_expiry) 
-                                                          if pd.notna(current_expiry) 
-                                                          else datetime.now() + timedelta(days=365))
-                            elif expiry_option == "Remove":
-                                new_expiry = None
-                            else:
-                                new_expiry = current_expiry
-                        else:
-                            expiry_option = st.radio("Add expiry date?", ["No", "Yes"])
-                            if expiry_option == "Yes":
-                                new_expiry = st.date_input("Expiry Date", 
-                                                          value=datetime.now() + timedelta(days=365))
-                            else:
-                                new_expiry = None
+                        categories = ["Stationery", "Comp/Printer/Accessories", "Miscellaneous", 
+                                     "Electrical Items", "Motor Parts", "Vehicle Parts - Toyota Hilux",
+                                     "Fuel & Lubricants", "Laboratory Items", "Medical Supplies", "Office Equipment"]
+                        current_category = item_data.get('category', 'Miscellaneous')
+                        new_category = st.selectbox("Category", 
+                                                  categories,
+                                                  index=categories.index(current_category) if current_category in categories else 0)
                         
                         new_reorder_level = st.number_input("Reorder Level (Units)", 
                                                           min_value=1, 
                                                           value=int(item_data.get('reorder_level', 10)))
                         
-                        if 'supplier' in item_data:
-                            new_supplier = st.text_input("Supplier", value=item_data.get('supplier', 'Standard Supplier'))
-                        
-                        if 'notes' in item_data:
-                            new_notes = st.text_area("Notes", value=item_data.get('notes', ''))
+                        new_supplier = st.text_input("Supplier", value=item_data.get('supplier', 'Standard Supplier'))
+                        new_notes = st.text_area("Notes", value=item_data.get('notes', ''))
                         
                         submitted = st.form_submit_button("💾 Save Changes", type="primary")
                         
                         if submitted:
-                            # Update inventory
-                            idx = inventory_df.index[inventory_df['item_name'] == item_to_edit][0]
+                            updates = {
+                                'quantity': new_quantity,
+                                'storage_location': new_location,
+                                'category': new_category,
+                                'reorder_level': new_reorder_level,
+                                'supplier': new_supplier,
+                                'notes': new_notes,
+                                'updated_at': datetime.now().isoformat(),
+                                'updated_by': user['username']
+                            }
                             
-                            # Check each field for changes
-                            inventory_df.at[idx, 'quantity'] = new_quantity
-                            inventory_df.at[idx, 'storage_location'] = new_location
-                            inventory_df.at[idx, 'category'] = new_category
-                            inventory_df.at[idx, 'reorder_level'] = new_reorder_level
-                            inventory_df.at[idx, 'supplier'] = new_supplier
-                            inventory_df.at[idx, 'notes'] = new_notes
+                            success, result = db.update_inventory_item(item_data['item_id'], updates)
                             
-                            # Handle expiry date changes
-                            if expiry_option == "Change" and new_expiry:
-                                inventory_df.at[idx, 'expiry_date'] = new_expiry.strftime('%Y-%m-%d') if hasattr(new_expiry, 'strftime') else str(new_expiry)
-                            elif expiry_option == "Remove":
-                                inventory_df.at[idx, 'expiry_date'] = None
-                            elif expiry_option == "Yes" and new_expiry:
-                                inventory_df.at[idx, 'expiry_date'] = new_expiry.strftime('%Y-%m-%d') if hasattr(new_expiry, 'strftime') else str(new_expiry)
-                            
-                            save_inventory_data(inventory_df)
-                            st.success("✅ Item updated successfully!")
-                            st.rerun()
+                            if success:
+                                st.success("✅ Item updated successfully!")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Error updating item: {result}")
                 
                 with col2:
-                    # Delete button with warning
                     st.markdown("### 🗑️")
                     st.markdown("##### Delete Item")
                     
                     st.warning(f"You are about to delete: **{item_to_edit}**")
                     st.info(f"Current stock: {item_data.get('quantity', 0)} units")
                     
-                    # Confirmation for deletion
                     delete_confirmed = st.checkbox("I confirm deletion")
                     
                     if st.button("🗑️ Delete Item", 
@@ -1007,12 +822,14 @@ elif selected_tab == "📦 Inventory":
                                 use_container_width=True,
                                 type="primary"):
                         
-                        # Remove item from inventory
-                        inventory_df = inventory_df[inventory_df['item_name'] != item_to_edit].reset_index(drop=True)
-                        save_inventory_data(inventory_df)
+                        success, result = db.delete_inventory_item(item_data['item_id'])
                         
-                        st.success(f"✅ Item '{item_to_edit}' deleted successfully!")
-                        st.rerun()
+                        if success:
+                            st.success(f"✅ Item '{item_to_edit}' deleted successfully!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Error deleting item: {result}")
 
 # STOCK IN TAB
 elif selected_tab == "📥 Stock In":
@@ -1066,36 +883,45 @@ elif selected_tab == "📥 Stock In":
                     st.error("No item selected!")
                 else:
                     # Update inventory
-                    idx = inventory_df.index[inventory_df['item_name'] == selected_item][0]
-                    inventory_df.at[idx, 'quantity'] = inventory_df.at[idx, 'quantity'] + quantity
-                    save_inventory_data(inventory_df)
+                    updates = {
+                        'quantity': current_stock + quantity,
+                        'updated_at': datetime.now().isoformat(),
+                        'updated_by': user['username']
+                    }
+                    success, result = db.update_inventory_item(item_data['item_id'], updates)
                     
-                    # Add to receipts
-                    new_receipt = pd.DataFrame([{
-                        'date': receipt_date.strftime('%Y-%m-%d'),
-                        'item_id': item_data['item_id'],
-                        'item_name': selected_item,
-                        'supplier': supplier,
-                        'quantity': quantity,
-                        'unit_cost': unit_cost,
-                        'total_value': total_value,
-                        'project_code': project_code,
-                        'reference': reference,
-                        'received_by': received_by,
-                        'notes': notes
-                    }])
-                    
-                    receipts_df = pd.concat([receipts_df, new_receipt], ignore_index=True)
-                    save_receipts_data(receipts_df)
-                    
-                    st.success(f"✅ Receipt recorded successfully! Stock updated to {inventory_df.at[idx, 'quantity']} units.")
-                    st.rerun()
+                    if success:
+                        # Add to receipts
+                        receipt_data = {
+                            'date': receipt_date.isoformat(),
+                            'item_id': item_data['item_id'],
+                            'item_name': selected_item,
+                            'supplier': supplier,
+                            'quantity': quantity,
+                            'unit_cost': unit_cost,
+                            'total_value': total_value,
+                            'project_code': project_code,
+                            'reference': reference,
+                            'received_by': received_by,
+                            'notes': notes,
+                            'created_at': datetime.now().isoformat()
+                        }
+                        
+                        success2, result2 = db.create_receipt(receipt_data)
+                        
+                        if success2:
+                            st.success(f"✅ Receipt recorded successfully! Stock updated.")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Error recording receipt: {result2}")
+                    else:
+                        st.error(f"❌ Error updating inventory: {result}")
     
     with tab2:
         st.markdown("#### 📋 Receipt History")
         
         if not receipts_df.empty:
-            # Filters
             col1, col2 = st.columns(2)
             with col1:
                 start_date = st.date_input("From Date", value=datetime.now() - timedelta(days=30))
@@ -1111,7 +937,6 @@ elif selected_tab == "📥 Stock In":
             ]
             
             if not filtered_receipts.empty:
-                # Summary
                 total_receipts = len(filtered_receipts)
                 total_quantity = filtered_receipts['quantity'].sum()
                 total_value = filtered_receipts['total_value'].sum()
@@ -1124,13 +949,11 @@ elif selected_tab == "📥 Stock In":
                 with col3:
                     st.metric("Total Value", f"GHS {total_value:,.2f}")
                 
-                # Display table
                 display_df = filtered_receipts.copy()
                 display_df['date'] = pd.to_datetime(display_df['date']).dt.strftime('%Y-%m-%d')
                 
                 st.dataframe(display_df, use_container_width=True)
                 
-                # Export option
                 csv = filtered_receipts.to_csv(index=False)
                 st.download_button(
                     "📥 Export Receipts",
@@ -1196,40 +1019,48 @@ elif selected_tab == "📤 Stock Out":
                     st.error(f"Cannot issue {quantity} units. Only {current_stock} available!")
                 else:
                     # Update inventory
-                    idx = inventory_df.index[inventory_df['item_name'] == selected_item][0]
-                    inventory_df.at[idx, 'quantity'] = inventory_df.at[idx, 'quantity'] - quantity
-                    save_inventory_data(inventory_df)
+                    updates = {
+                        'quantity': current_stock - quantity,
+                        'updated_at': datetime.now().isoformat(),
+                        'updated_by': user['username']
+                    }
+                    success, result = db.update_inventory_item(item_data['item_id'], updates)
                     
-                    # Add to issues
-                    new_issue = pd.DataFrame([{
-                        'date': issue_date.strftime('%Y-%m-%d'),
-                        'item_id': item_data['item_id'],
-                        'item_name': selected_item,
-                        'department': department,
-                        'quantity': quantity,
-                        'purpose': purpose,
-                        'issued_by': issued_by,
-                        'notes': notes
-                    }])
-                    
-                    issues_df = pd.concat([issues_df, new_issue], ignore_index=True)
-                    save_issues_data(issues_df)
-                    
-                    st.success(f"✅ Stock issued successfully! Remaining stock: {inventory_df.at[idx, 'quantity']} units.")
-                    st.rerun()
+                    if success:
+                        # Add to issues
+                        issue_data = {
+                            'date': issue_date.isoformat(),
+                            'item_id': item_data['item_id'],
+                            'item_name': selected_item,
+                            'department': department,
+                            'quantity': quantity,
+                            'purpose': purpose,
+                            'issued_by': issued_by,
+                            'notes': notes,
+                            'created_at': datetime.now().isoformat()
+                        }
+                        
+                        success2, result2 = db.create_issue(issue_data)
+                        
+                        if success2:
+                            st.success(f"✅ Stock issued successfully!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Error recording issue: {result2}")
+                    else:
+                        st.error(f"❌ Error updating inventory: {result}")
     
     with tab2:
         st.markdown("#### 📋 Issue History")
         
         if not issues_df.empty:
-            # Filters
             col1, col2 = st.columns(2)
             with col1:
                 start_date = st.date_input("From Date", value=datetime.now() - timedelta(days=30))
             with col2:
                 end_date = st.date_input("To Date", value=datetime.now())
             
-            # Filter issues
             filtered_issues = issues_df.copy()
             filtered_issues['date'] = pd.to_datetime(filtered_issues['date'], errors='coerce')
             filtered_issues = filtered_issues[
@@ -1238,7 +1069,6 @@ elif selected_tab == "📤 Stock Out":
             ]
             
             if not filtered_issues.empty:
-                # Summary
                 total_issues = len(filtered_issues)
                 total_quantity = filtered_issues['quantity'].sum()
                 departments = filtered_issues['department'].nunique()
@@ -1251,13 +1081,11 @@ elif selected_tab == "📤 Stock Out":
                 with col3:
                     st.metric("Departments", departments)
                 
-                # Display table
                 display_df = filtered_issues.copy()
                 display_df['date'] = pd.to_datetime(display_df['date']).dt.strftime('%Y-%m-%d')
                 
                 st.dataframe(display_df, use_container_width=True)
                 
-                # Export option
                 csv = filtered_issues.to_csv(index=False)
                 st.download_button(
                     "📥 Export Issues",
@@ -1270,24 +1098,20 @@ elif selected_tab == "📤 Stock Out":
         else:
             st.info("No issues recorded yet.")
 
-# EXPIRY TAB (Simplified for now)
+# EXPIRY TAB
 elif selected_tab == "⏰ Expiry":
     st.markdown('<div class="section-header"><h2>⏰ Expiry Management</h2></div>', unsafe_allow_html=True)
     
     if not inventory_df.empty and 'expiry_date' in inventory_df.columns:
-        # Calculate expiry data
         inventory_df['expiry_date_dt'] = pd.to_datetime(inventory_df['expiry_date'], errors='coerce')
         current_date = pd.Timestamp.now()
         inventory_df['days_to_expiry'] = (inventory_df['expiry_date_dt'] - current_date).dt.days
         
-        # Get items with expiry dates
         expiry_items = inventory_df[pd.notna(inventory_df['expiry_date'])]
         
         if not expiry_items.empty:
-            # Status cards
             col1, col2, col3, col4 = st.columns(4)
             
-            # Calculate counts for different expiry categories
             expired = (expiry_items['days_to_expiry'] <= 0).sum()
             expiring_30 = ((expiry_items['days_to_expiry'] > 0) & 
                           (expiry_items['days_to_expiry'] <= 30)).sum()
@@ -1305,7 +1129,6 @@ elif selected_tab == "⏰ Expiry":
             with col4:
                 st.metric("90-180 Days", expiring_180)
             
-            # Expired items table
             st.markdown("#### 🚨 Expired Items")
             expired_items = expiry_items[expiry_items['days_to_expiry'] <= 0]
             if not expired_items.empty:
@@ -1313,7 +1136,6 @@ elif selected_tab == "⏰ Expiry":
             else:
                 st.success("✅ No expired items!")
             
-            # Items expiring soon
             st.markdown("#### ⚠️ Items Expiring Soon (≤ 30 days)")
             expiring_soon = expiry_items[(expiry_items['days_to_expiry'] > 0) & 
                                          (expiry_items['days_to_expiry'] <= 30)]
@@ -1326,7 +1148,7 @@ elif selected_tab == "⏰ Expiry":
     else:
         st.info("No expiry data available. Add expiry dates to items in the Inventory tab.")
 
-# REPORTS TAB (Simplified)
+# REPORTS TAB
 elif selected_tab == "📝 Reports":
     st.markdown('<div class="section-header"><h2>📈 Reports & Analytics</h2></div>', unsafe_allow_html=True)
     
@@ -1335,7 +1157,6 @@ elif selected_tab == "📝 Reports":
     with tab1:
         st.markdown("#### 📅 Stores Summary Report")
         
-        # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -1350,7 +1171,6 @@ elif selected_tab == "📝 Reports":
             total_issues = issues_df['quantity'].sum() if not issues_df.empty and 'quantity' in issues_df.columns else 0
             st.metric("Total Issued", f"{total_issues:,}")
         
-        # Generate report
         if st.button("🔄 Generate Report", type="primary"):
             st.success("Report generated successfully!")
     
@@ -1369,8 +1189,6 @@ elif selected_tab == "📝 Reports":
                     mime="text/csv",
                     use_container_width=True
                 )
-            else:
-                st.warning("No inventory data to export")
         
         with col2:
             if not receipts_df.empty:
@@ -1382,8 +1200,6 @@ elif selected_tab == "📝 Reports":
                     mime="text/csv",
                     use_container_width=True
                 )
-            else:
-                st.warning("No receipts data to export")
         
         with col3:
             if not issues_df.empty:
@@ -1395,8 +1211,6 @@ elif selected_tab == "📝 Reports":
                     mime="text/csv",
                     use_container_width=True
                 )
-            else:
-                st.warning("No issues data to export")
 
 # SETTINGS TAB (Admin only)
 elif selected_tab == "⚙️ Settings":
@@ -1412,36 +1226,28 @@ elif selected_tab == "⚙️ Settings":
     with tab1:
         st.markdown("#### 👥 User Management")
         
-        # Get users data
-        users_df = auth.get_users()
+        users_df = db.get_users()
         
-        # View Users
         st.markdown("##### 📋 All System Users")
         
         if not users_df.empty:
             st.dataframe(users_df[['username', 'full_name', 'role', 'department', 'created_at']], use_container_width=True)
         
-        # Add New User
         st.markdown("##### ➕ Add New User")
         
         with st.form("add_user_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             
             with col1:
-                new_username = st.text_input("Username*", 
-                                            placeholder="e.g., store_officer")
-                new_fullname = st.text_input("Full Name*", 
-                                            placeholder="e.g., Store Officer")
-                new_role = st.selectbox("Role*", 
-                                      ["user", "manager", "admin"])
+                new_username = st.text_input("Username*", placeholder="e.g., store_officer")
+                new_fullname = st.text_input("Full Name*", placeholder="e.g., Store Officer")
+                new_role = st.selectbox("Role*", ["user", "manager", "admin"])
             
             with col2:
                 new_department = st.selectbox("Department*",
                                             ["General Stores", "Finance", "Research", "Administration", "IT"])
-                new_password = st.text_input("Initial Password*", 
-                                            type="password")
-                confirm_password = st.text_input("Confirm Password*", 
-                                                type="password")
+                new_password = st.text_input("Initial Password*", type="password")
+                confirm_password = st.text_input("Confirm Password*", type="password")
             
             submitted = st.form_submit_button("➕ Create User", type="primary")
             
@@ -1474,10 +1280,10 @@ elif selected_tab == "⚙️ Settings":
         
         st.info(f"""
         **System Details:**
-        - **Version:** 1.1.0
+        - **Version:** 2.0.0 (Supabase Edition)
         - **Last Updated:** {datetime.now().strftime('%Y-%m-%d')}
-        - **Database:** Local Storage (CSV)
-        - **Total Users:** {len(auth.get_users())}
+        - **Database:** Supabase (PostgreSQL)
+        - **Total Users:** {len(users_df) if not users_df.empty else 0}
         
         **Inventory Statistics:**
         - Total Items: {len(inventory_df)}
@@ -1494,10 +1300,7 @@ elif selected_tab == "⚙️ Settings":
 st.markdown("---")
 st.markdown(
     "<p style='text-align:center;font-size:13px;color:gray;margin-top:25px;'>"
-    "© 2026 Navrongo Health Research Centre – Stores Management System<br>"
+    "© 2026 Navrongo Health Research Centre – Stores Management System (Supabase Edition)<br>"
     "Built by Amenga-etego Fedelis</p>",
     unsafe_allow_html=True
 )
-
-
-
